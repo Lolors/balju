@@ -7,6 +7,10 @@ from pathlib import Path
 import streamlit as st
 
 from repositories import purchase_repository
+from services.master_data_service import MasterDataService
+from services.order_service import OrderService
+from services.purchase_service import PurchaseService
+from services.correction_service import CorrectionService
 
 
 @st.cache_resource(show_spinner=False)
@@ -148,93 +152,49 @@ def build_application(base_dir: Path):
         draft_repo = DraftRepository(core_app.DATA)
         draft_repo.migrate_legacy_csv_once()
         order_repo = OrderRepository(core_app.DATA, core_app)
+        master_data_service = MasterDataService(catalog_repo)
+        order_service = OrderService(core_app, draft_repo, order_repo)
+        purchase_service = PurchaseService(core_app.DATA)
+        correction_service = CorrectionService(core_app.DATA)
 
         @core_app.st.cache_data(show_spinner=False)
         def load_data_from_repositories():
-            vendors = catalog_repo.load_vendors()
-            products = catalog_repo.load_products()
-            products["정식제품명"] = products["제품명"]
-            products["단위"] = products["포장단위"]
-            aliases = catalog_repo.load_aliases()
-            drafts, draft_items = draft_repo.load_all()
-            orders, order_items = order_repo.load_all()
+            vendors, products, aliases = master_data_service.load_all()
+            drafts, draft_items, orders, order_items = order_service.load_all()
             return vendors, products, aliases, drafts, draft_items, orders, order_items
 
         @core_app.st.cache_data(show_spinner=False)
         def load_purchase_data_cached():
-            return purchase_repository.load_all(core_app.DATA)
+            return purchase_service.load_all()
 
         def clear_data_cache() -> None:
             load_data_from_repositories.clear()
             load_purchase_data_cached.clear()
 
+        master_data_service.set_cache_invalidator(clear_data_cache)
+        order_service.set_cache_invalidator(clear_data_cache)
+        purchase_service.set_cache_invalidator(clear_data_cache)
+        correction_service.set_cache_invalidator(clear_data_cache)
+
         def read_products_from_db():
-            return product_schema.products_for_app(catalog_repo.load_products())
-
-        def save_products(products):
-            catalog_repo.save_products(products)
-            clear_data_cache()
-
-        def save_aliases(aliases):
-            catalog_repo.save_aliases(aliases)
-            clear_data_cache()
-
-        def save_vendors(vendors):
-            catalog_repo.save_vendors(vendors)
-            clear_data_cache()
-
-        def save_order(vendor_name, request_note, items):
-            editing_order_id = str(core_app.st.session_state.get("editing_order_id", "") or "").strip()
-            if editing_order_id:
-                order_id = order_repo.update(editing_order_id, vendor_name, request_note, items)
-                core_app.st.session_state.pop("editing_order_id", None)
-            else:
-                order_id = order_repo.save(vendor_name, request_note, items)
-            clear_data_cache()
-            return order_id
-
-        def delete_order(order_id):
-            order_repo.delete(order_id)
-            clear_data_cache()
-
-        def save_draft(vendor_name, request_note, items):
-            draft_id = draft_repo.save(vendor_name, request_note, items)
-            clear_data_cache()
-            return draft_id
-
-        def delete_draft(draft_id):
-            draft_repo.delete(draft_id)
-            clear_data_cache()
+            return master_data_service.read_products(product_schema)
 
         core_app.load_data = load_data_from_repositories
         product_schema.read_products_file = read_products_from_db
-        product_schema.save_products_with_schema = save_products
+        product_schema.save_products_with_schema = master_data_service.save_products
 
-        core_app.save_products = save_products
-        core_app.save_aliases = save_aliases
-        core_app.save_vendors = save_vendors
-        core_app.save_order = save_order
-        core_app.delete_order = delete_order
-        core_app.save_draft = save_draft
-        core_app.delete_draft = delete_draft
+        core_app.save_products = master_data_service.save_products
+        core_app.save_aliases = master_data_service.save_aliases
+        core_app.save_vendors = master_data_service.save_vendors
+        core_app.save_order = order_service.save_order
+        core_app.delete_order = order_service.delete_order
+        core_app.save_draft = order_service.save_draft
+        core_app.delete_draft = order_service.delete_draft
 
         purchase.load_purchase_data = load_purchase_data_cached
 
-        def save_purchase_table(path, df, columns):
-            filename = Path(path).name
-            if filename == "purchase_statements.csv":
-                purchase_repository.replace_statements(core_app.DATA, df)
-            elif filename == "purchase_statement_items.csv":
-                purchase_repository.replace_statement_items(core_app.DATA, df)
-            elif filename == "price_history.csv":
-                purchase_repository.replace_price_history(core_app.DATA, df)
-            elif filename == "purchase_month_close.csv":
-                purchase_repository.replace_monthly_closes(core_app.DATA, df)
-            else:
-                raise ValueError(f"지원하지 않는 매입 데이터 저장 대상입니다: {filename}")
-            clear_data_cache()
-
-        purchase.save_table = save_purchase_table
+        purchase.save_table = purchase_service.save_table
+        core_app.correction_service = correction_service
 
     return core_app, purchase, db_status, run_pages
 

@@ -749,7 +749,7 @@ def create_pdf(vendor, order_items, request_note, order_date=None):
     y -= 22
 
     c.setFont(font_name, 11)
-    c.drawRightString(width - x_margin, y, f"총 품목수 : {fmt_int(total_count)}건    총 수량 : {fmt_int(total_qty)} EA")
+    c.drawRightString(width - x_margin, y, f"총 품목수 : {fmt_int(total_count)}개    총 수량 : {fmt_int(total_qty)}")
 
     y -= 35
     c.setFont(font_name, 10)
@@ -1720,13 +1720,13 @@ def page_write(vendors, products, aliases, drafts, draft_items, orders, order_it
 
                 with count_col:
                     st.markdown(
-                        f'<div style="text-align:right;font-weight:900;padding-top:10px;">총 품목수&nbsp;&nbsp;<span style="font-size:22px;">{fmt_int(total_count)} 건</span></div>',
+                        f'<div style="text-align:right;font-weight:900;padding-top:10px;">총 품목수&nbsp;&nbsp;<span style="font-size:22px;">{fmt_int(total_count)} 개</span></div>',
                         unsafe_allow_html=True,
                     )
 
                 with qty_col:
                     st.markdown(
-                        f'<div style="text-align:right;font-weight:900;padding-top:10px;">총 수량&nbsp;&nbsp;<span style="font-size:24px;color:#0052cc;">{fmt_int(total_qty)} EA</span></div>',
+                        f'<div style="text-align:right;font-weight:900;padding-top:10px;">총 수량&nbsp;&nbsp;<span style="font-size:24px;color:#0052cc;">{fmt_int(total_qty)}</span></div>',
                         unsafe_allow_html=True,
                     )
 

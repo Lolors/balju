@@ -4,8 +4,7 @@ from __future__ import annotations
 from ui.navigation import render_sidebar
 from ui.pages import (
     accounting_export_delete_ui,
-    alias_manage,
-    catalog,
+    master_data,
     order_list_enhanced,
     order_write,
     orders,
@@ -13,6 +12,7 @@ from ui.pages import (
     purchases,
     statement_history_lot_ui,
     statement_register_lot_ui,
+    integrated_correction,
 )
 
 
@@ -44,12 +44,12 @@ def run(core_app, purchase_module) -> None:
         "거래명세서 등록": lambda: statement_register_lot_ui.render(purchase_module, data),
         "거래명세서 내역": lambda: statement_history_lot_ui.render(purchase_module, data),
         "월별 매입 현황": lambda: accounting_export_delete_ui.render(purchase_module, data),
-        "거래처 관리": lambda: catalog.vendors(core_app, data),
-        "제품 관리": lambda: catalog.products(core_app, data),
-        "별칭 관리": lambda: alias_manage.render(core_app, data),
+        "통합 수정": lambda: integrated_correction.render(core_app, data, purchase_module),
     }
 
     handler = routes.get(page)
+    if master_data.handles(page):
+        handler = lambda: master_data.render(page, core_app, data)
     if handler is None:
         core_app.page_placeholder(page)
         return

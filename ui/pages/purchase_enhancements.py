@@ -6,6 +6,7 @@ from datetime import datetime
 import pandas as pd
 
 from ui.pages import purchases
+from ui.pages.statement_register_substitution import _normalize_expiry
 
 
 def _to_int(purchase_module, value) -> int:
@@ -103,13 +104,18 @@ def _statement_display_table(items: pd.DataFrame, purchase_module):
 
 
 def _editable_items(items: pd.DataFrame, purchase_module) -> pd.DataFrame:
-    columns = ["제품코드", "정식제품명", "규격", "단위", "발주수량", "입고수량", "매입단가"]
+    columns = [
+        "제품코드", "정식제품명", "규격", "단위", "발주수량", "입고수량", "매입단가",
+        "제조번호", "유통기한",
+    ]
     editable = items.copy().fillna("")
     for col in columns:
         if col not in editable.columns:
             editable[col] = ""
     for col in ["발주수량", "입고수량", "매입단가"]:
         editable[col] = editable[col].apply(lambda value: _to_int(purchase_module, value))
+    for col in ["제조번호", "유통기한"]:
+        editable[col] = editable[col].astype(str)
     return editable[columns].reset_index(drop=True)
 
 
@@ -155,6 +161,10 @@ def _save_statement_edit(
         product_amount = quantity * purchase_price
         product_code = str(row.get("제품코드", "") or "").strip()
         product_name = str(row.get("정식제품명", "") or "").strip()
+        try:
+            expiry = _normalize_expiry(row.get("유통기한", ""))
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         item_rows.append({
             "명세서ID": statement_id,
             "순번": sequence,
@@ -168,6 +178,8 @@ def _save_statement_edit(
             "상품금액": product_amount,
             "출고단가": sale_price,
             "가격적용여부": "적용",
+            "제조번호": str(row.get("제조번호", "") or "").strip(),
+            "유통기한": expiry,
         })
         price_rows.append({
             "가격ID": f"PRICE-{statement_id}-{sequence}",
@@ -356,6 +368,10 @@ def statement_list(purchase_module, data) -> None:
                                 column_config={
                                     "입고수량": st.column_config.NumberColumn(min_value=0, step=1),
                                     "매입단가": st.column_config.NumberColumn(min_value=0, step=100, format="%d원"),
+                                    "제조번호": st.column_config.TextColumn(),
+                                    "유통기한": st.column_config.TextColumn(
+                                        help="예: 2026-12-31, 20261231, 261231"
+                                    ),
                                 },
                             )
                             save_col, cancel_col = st.columns(2)

@@ -6,6 +6,7 @@ from datetime import datetime
 import pandas as pd
 
 from ui.pages import purchase_enhancements, purchases
+from ui.style_utils import map_cells
 
 
 def _to_int(purchase_module, value) -> int:
@@ -145,11 +146,11 @@ def _statement_display_table(items: pd.DataFrame, purchase_module):
             return "background-color: #fee2e2; color: #991b1b; font-weight: 700;"
         return ""
 
-    return (
-        display.style
-        .set_properties(subset=["매출단가"], **{"background-color": "#f3f4f6", "color": "#4b5563"})
-        .applymap(style_status, subset=["상태"])
+    styler = display.style.set_properties(
+        subset=["매출단가"],
+        **{"background-color": "#f3f4f6", "color": "#4b5563"},
     )
+    return map_cells(styler, style_status, subset=["상태"])
 
 
 def _returned_amount(items: pd.DataFrame) -> int:
@@ -177,8 +178,22 @@ def render(purchase_module, data) -> None:
         """
 <style>
 .st-key-statement_history_filters { width: 100%; max-width: 100%; }
-.st-key-statement_history_results { width: 100%; max-width: 100%; }
-[class*="st-key-statement_order_content_"] { width: 30vw; max-width: 30vw; }
+.st-key-statement_history_results {
+    width: 100%;
+    max-width: 100%;
+    max-height: none !important;
+    overflow: visible !important;
+}
+[class*="st-key-statement_order_content_"] {
+    width: 30vw;
+    max-width: 30vw;
+    max-height: none !important;
+    overflow: visible !important;
+}
+[data-testid="stMain"] {
+    overflow-y: scroll !important;
+    scrollbar-gutter: stable !important;
+}
 .statement-summary-title { font-size: 21px; font-weight: 800; margin: 22px 0 8px 0; }
 .statement-total-box { font-size: 23px; font-weight: 800; padding: 10px 0 2px 0; }
 .statement-total-detail { font-size: 14px; color: #6b7280; margin: 0 0 16px 0; }
@@ -191,15 +206,23 @@ def render(purchase_module, data) -> None:
     )
 
     orders["발주ID"] = orders["발주ID"].astype(str)
-    orders["_order_date"] = pd.to_datetime(orders["발주일시"], errors="coerce").dt.date
+    statements = statements.copy()
+    statements["발주ID"] = statements["발주ID"].astype(str)
+    statements["_statement_date"] = pd.to_datetime(
+        statements["명세서일자"], errors="coerce"
+    ).dt.date
     today = datetime.now().date()
     vendor_options = ["전체"] + sorted(
-        orders["거래처명"].astype(str).replace("", pd.NA).dropna().unique().tolist()
+        statements["거래처명"].astype(str).replace("", pd.NA).dropna().unique().tolist()
     )
 
     with st.container(key="statement_history_filters"):
         c1, c2, c3, c4 = st.columns([1, 1, 3, 5], gap="small")
-        start_date = c1.date_input("시작", value=today, key="statement_history_start")
+        start_date = c1.date_input(
+            "시작",
+            value=(pd.Timestamp(today) - pd.DateOffset(months=1)).date(),
+            key="statement_history_start",
+        )
         end_date = c2.date_input("끝", value=today, key="statement_history_end")
         vendor = c3.selectbox("거래처별 검색", vendor_options, key="statement_history_vendor")
         keyword = c4.text_input(
@@ -212,47 +235,62 @@ def render(purchase_module, data) -> None:
         st.warning("시작일은 종료일보다 늦을 수 없습니다.")
         return
 
-    matched_orders = orders[
-        (orders["_order_date"] >= start_date) & (orders["_order_date"] <= end_date)
+    matched_statements = statements[
+        (statements["_statement_date"] >= start_date)
+        & (statements["_statement_date"] <= end_date)
     ].copy()
     if vendor != "전체":
-        matched_orders = matched_orders[matched_orders["거래처명"].astype(str) == vendor]
+        matched_statements = matched_statements[
+            matched_statements["거래처명"].astype(str) == vendor
+        ]
 
     keyword_text = str(keyword or "").strip()
     if keyword_text:
         matching_statement_ids = purchase_enhancements._matching_order_ids_by_product(
             statement_items, aliases, keyword_text
         )
-        matching_order_ids = set(
-            statements[
-                statements["명세서ID"].astype(str).isin(matching_statement_ids)
-            ]["발주ID"].astype(str)
-        )
-        matched_orders = matched_orders[matched_orders["발주ID"].isin(matching_order_ids)]
+        matched_statements = matched_statements[
+            matched_statements["명세서ID"].astype(str).isin(matching_statement_ids)
+        ]
 
-    linked_order_ids = set(statements["발주ID"].astype(str))
-    matched_orders = matched_orders[
-        matched_orders["발주ID"].isin(linked_order_ids)
-    ].sort_values("발주일시", ascending=False)
+    matched_order_ids = set(matched_statements["발주ID"].astype(str))
+    matched_orders = orders[
+        orders["발주ID"].isin(matched_order_ids)
+    ].copy()
+    if not matched_statements.empty:
+        latest_statement_date = (
+            matched_statements.groupby("발주ID")["_statement_date"].max().to_dict()
+        )
+        matched_orders["_latest_statement_date"] = matched_orders["발주ID"].map(
+            latest_statement_date
+        )
+        matched_orders = matched_orders.sort_values(
+            ["_latest_statement_date", "발주일시"], ascending=False
+        )
     if matched_orders.empty:
-        st.info("검색 조건에 맞는 발주서가 없습니다.")
+        st.info("검색 조건에 맞는 거래명세서가 없습니다.")
         return
 
-    st.caption(f"검색 결과: 발주서 {len(matched_orders):,}건")
+    st.caption(
+        f"검색 결과: 거래명세서 {len(matched_statements):,}건 · "
+        f"연결 발주서 {len(matched_orders):,}건"
+    )
     with st.container(key="statement_history_results"):
         for _, order in matched_orders.iterrows():
             order_id = str(order.get("발주ID", ""))
             vendor_name = str(order.get("거래처명", ""))
             order_date = purchases._date_text(order.get("발주일시", ""))
-            linked_statements = statements[
-                statements["발주ID"].astype(str) == order_id
+            linked_statements = matched_statements[
+                matched_statements["발주ID"].astype(str) == order_id
             ].copy().sort_values(["명세서일자", "등록일시"])
             linked_ids = linked_statements["명세서ID"].astype(str).tolist()
             all_items = statement_items[
                 statement_items["명세서ID"].astype(str).isin(linked_ids)
             ].copy()
             order_rows = order_items[order_items["발주ID"].astype(str) == order_id].copy()
-            label = f"[{vendor_name}] {order_date} | {order_id}"
+            latest_statement = linked_statements.iloc[-1]
+            statement_date = purchases._date_text(latest_statement.get("명세서일자", ""))
+            label = f"[{vendor_name}] 발주 {order_date} · 명세서 {statement_date} | {order_id}"
 
             with st.expander(label, expanded=False):
                 with st.container(key=f"statement_order_content_{order_id}"):
@@ -432,6 +470,10 @@ def render(purchase_module, data) -> None:
                                     "입고수량": st.column_config.NumberColumn(min_value=0, step=1),
                                     "매입단가": st.column_config.NumberColumn(
                                         min_value=0, step=100, format="%d원"
+                                    ),
+                                    "제조번호": st.column_config.TextColumn(),
+                                    "유통기한": st.column_config.TextColumn(
+                                        help="예: 2026-12-31, 20261231, 261231"
                                     ),
                                 },
                             )

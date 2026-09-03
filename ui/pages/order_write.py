@@ -139,7 +139,25 @@ def render(core_app, data) -> None:
     if st.session_state.pop("reset_order_form_after_save", False):
         _reset_order_form_state(st)
 
-    st.markdown("## 발주 작성")
+    st.markdown(
+        """
+<style>
+.st-key-order_date { transform: translateY(6px); }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+    title_col, date_col, _ = st.columns(
+        [0.85, 1.25, 5], gap="small", vertical_alignment="center"
+    )
+    title_col.markdown("## 발주 작성")
+    order_date = date_col.date_input(
+        "발주일자",
+        value=st.session_state.get("order_date", datetime.now().date()),
+        key="order_date",
+        label_visibility="collapsed",
+        help="발주일자",
+    )
     if st.session_state.pop("order_saved_success", False):
         saved_order_id = st.session_state.pop("last_saved_order_id", "")
         st.success(f"발주 완료: {saved_order_id}")
@@ -325,11 +343,6 @@ def render(core_app, data) -> None:
 
         with st.container(border=True):
             st.markdown("### 요청사항 및 발주 저장")
-            order_date = st.date_input(
-                "발주일자",
-                value=st.session_state.get("order_date", datetime.now().date()),
-                key="order_date",
-            )
             request_note = st.text_area(
                 "요청사항",
                 value=st.session_state.get("loaded_request_note", ""),

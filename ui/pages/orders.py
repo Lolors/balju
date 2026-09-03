@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from ui.style_utils import map_cells
+
 
 def _normalise_items(core_app, rows: pd.DataFrame) -> list[dict]:
     if rows is None or rows.empty:
@@ -310,7 +312,7 @@ def _status_cell_style(value) -> str:
 def _style_status_column(frame: pd.DataFrame):
     if "상태" not in frame.columns:
         return frame
-    return frame.style.applymap(_status_cell_style, subset=["상태"])
+    return map_cells(frame.style, _status_cell_style, subset=["상태"])
 
 
 def _receipt_review(core_app, purchase_module, order_id: str, order_items: pd.DataFrame) -> None:

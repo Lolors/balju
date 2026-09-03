@@ -167,6 +167,61 @@ def _normalise_bool(value) -> bool:
     return bool(value) if not isinstance(value, str) else value.strip().lower() in {"y", "yes", "true", "1"}
 
 
+def _freight_amount(value) -> int:
+    try:
+        return max(0, int(float(str(value or "0").replace(",", ""))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _scaled_freight_value(value, operation: str) -> int:
+    """운송비를 두 배 또는 절반으로 조정합니다."""
+    amount = _freight_amount(value)
+    if operation == "double":
+        return amount * 2
+    if operation == "half":
+        return amount // 2
+    raise ValueError("지원하지 않는 운송비 조정입니다.")
+
+
+def _freight_input(st, container, selected_order: str) -> int:
+    """직접 입력과 절반/두 배 단축 버튼을 함께 표시합니다."""
+    freight_key = f"statement_freight_{selected_order}"
+    if freight_key not in st.session_state:
+        st.session_state[freight_key] = 0
+
+    container.markdown("**운송비(배송비)**")
+    minus_col, value_col, plus_col = container.columns([1, 3, 1], gap="small")
+    if minus_col.button(
+        "−",
+        key=f"statement_freight_half_{selected_order}",
+        help="현재 운송비를 절반으로 줄입니다.",
+        use_container_width=True,
+    ):
+        st.session_state[freight_key] = _scaled_freight_value(
+            st.session_state.get(freight_key, 0), "half"
+        )
+    if plus_col.button(
+        "+",
+        key=f"statement_freight_double_{selected_order}",
+        help="현재 운송비를 2배로 늘립니다.",
+        use_container_width=True,
+    ):
+        st.session_state[freight_key] = _scaled_freight_value(
+            st.session_state.get(freight_key, 0), "double"
+        )
+
+    return int(
+        value_col.number_input(
+            "운송비(배송비)",
+            min_value=0,
+            step=1000,
+            key=freight_key,
+            label_visibility="collapsed",
+        )
+    )
+
+
 def _actual_for_item(original, substitution: dict | None) -> dict:
     if substitution:
         return substitution.get("제품", {})
@@ -454,7 +509,7 @@ def render(purchase_module, data) -> None:
         st.session_state[f"show_substitution_cancel_{selected_order}"] = True
         st.session_state[f"show_substitution_form_{selected_order}"] = False
 
-    freight = freight_col.number_input("운송비(배송비)", min_value=0, value=0, step=1000, key=f"statement_freight_{selected_order}")
+    freight = _freight_input(st, freight_col, selected_order)
     freight_checked = freight_col.checkbox("운송비 무료", value=False, key=f"statement_freight_checked_{selected_order}")
 
     if st.session_state.get(f"show_substitution_form_{selected_order}", False):
@@ -561,14 +616,15 @@ def render(purchase_module, data) -> None:
             "유통기한": expiry,
         })
 
-    quantity_errors = []
+    quantity_notices = []
     for item_no, total_quantity in quantity_by_item.items():
         remaining = remaining_by_item.get(item_no, 0)
         if total_quantity > remaining:
             product_name = str(selected_lookup.get(item_no, {}).get("제품명", ""))
-            quantity_errors.append(
-                f"{product_name}의 입고수량 합계가 남은수량을 초과했습니다. "
-                f"남은수량 {remaining:,}개 / 입력수량 {total_quantity:,}개"
+            quantity_notices.append(
+                f"{product_name}의 입고수량 합계가 발주 남은수량을 초과했습니다 "
+                f"(남은수량 {remaining:,}개 / 입력수량 {total_quantity:,}개). "
+                "발주단위와 입고단위가 달라 발생할 수 있으며 저장은 계속 진행됩니다."
             )
 
     preview = pd.DataFrame(preview_rows)
@@ -578,12 +634,12 @@ def render(purchase_module, data) -> None:
     b.metric("운송비", f"{int(freight):,}원")
     c.metric("총 매입금액", f"{product_total + int(freight):,}원")
 
+    if quantity_notices:
+        st.info("\n".join(dict.fromkeys(quantity_notices)))
+
     if st.button("거래명세서 저장", type="primary", use_container_width=True):
         if expiry_errors:
             st.warning("\n".join(dict.fromkeys(expiry_errors)))
-            return
-        if quantity_errors:
-            st.warning("\n".join(quantity_errors))
             return
         if preview.empty:
             st.warning("입고할 품목을 선택하고 입고수량을 입력하세요.")

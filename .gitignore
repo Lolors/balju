@@ -27,3 +27,4 @@ Thumbs.db
 .vscode/
 .idea/
 data/purchase_order.db
+data/correction_backups/

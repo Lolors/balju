@@ -1,7 +1,7 @@
 """행 클릭과 검색 필터를 제공하는 발주서 목록 화면."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -60,6 +60,30 @@ def _filter_orders(headers, items, start_date, end_date, vendor_name, keyword):
     return filtered.drop(columns=["_ordered_date"], errors="ignore")
 
 
+def _default_start_date(headers: pd.DataFrame, today):
+    """달력 기준 한 달 전과 미입고 발주 중 더 이른 날짜를 반환합니다."""
+    default = (pd.Timestamp(today) - pd.DateOffset(months=1)).date()
+    pending_dates = pd.to_datetime(
+        headers.loc[headers["상태"].astype(str) == "발주완료", "발주일시"],
+        errors="coerce",
+    ).dropna()
+    return min(default, pending_dates.min().date()) if not pending_dates.empty else default
+
+
+def _sort_orders(headers: pd.DataFrame) -> pd.DataFrame:
+    """미입고 발주를 먼저, 같은 상태 안에서는 최신순으로 정렬합니다."""
+    result = headers.copy()
+    result["_status_priority"] = (result["상태"].astype(str) != "발주완료").astype(int)
+    return (
+        result.sort_values(
+            ["_status_priority", "발주일시"],
+            ascending=[True, False],
+        )
+        .drop(columns=["_status_priority"])
+        .reset_index(drop=True)
+    )
+
+
 def render(core_app, data, purchase_module=None) -> None:
     st = core_app.st
     vendors = data["vendors"]
@@ -72,8 +96,24 @@ def render(core_app, data, purchase_module=None) -> None:
         return
 
     today = datetime.now().date()
+    working_headers = headers.copy()
+    if "상태" not in working_headers.columns:
+        working_headers["상태"] = "발주완료"
+
+    status_by_order = orders._receipt_status_map(core_app, purchase_module, items)
+    if status_by_order:
+        working_headers["상태"] = working_headers.apply(
+            lambda row: status_by_order.get(
+                str(row.get("발주ID", "")),
+                str(row.get("상태", "발주완료") or "발주완료"),
+            ),
+            axis=1,
+        )
+
+    default_start_date = _default_start_date(working_headers, today)
+
     vendor_options = ["전체"] + sorted(
-        headers["거래처명"].astype(str).replace("", pd.NA).dropna().unique().tolist()
+        working_headers["거래처명"].astype(str).replace("", pd.NA).dropna().unique().tolist()
     )
     with st.container(border=True):
         start_col, end_col, vendor_col, keyword_col = st.columns(
@@ -81,7 +121,7 @@ def render(core_app, data, purchase_module=None) -> None:
         )
         start_date = start_col.date_input(
             "시작일",
-            value=today - timedelta(days=30),
+            value=default_start_date,
             key="order_list_start_date",
         )
         end_date = end_col.date_input(
@@ -105,7 +145,7 @@ def render(core_app, data, purchase_module=None) -> None:
         return
 
     filtered_headers = _filter_orders(
-        headers,
+        working_headers,
         items,
         start_date,
         end_date,
@@ -116,21 +156,7 @@ def render(core_app, data, purchase_module=None) -> None:
         st.info("검색 조건에 맞는 발주서가 없습니다.")
         return
 
-    display_headers = filtered_headers.sort_values(
-        "발주일시", ascending=False
-    ).reset_index(drop=True)
-    if "상태" not in display_headers.columns:
-        display_headers["상태"] = "발주완료"
-
-    status_by_order = orders._receipt_status_map(core_app, purchase_module, items)
-    if status_by_order:
-        display_headers["상태"] = display_headers.apply(
-            lambda row: status_by_order.get(
-                str(row.get("발주ID", "")),
-                str(row.get("상태", "발주완료") or "발주완료"),
-            ),
-            axis=1,
-        )
+    display_headers = _sort_orders(filtered_headers)
 
     st.caption(
         f"검색 결과 {len(display_headers):,}건 · 발주ID가 있는 행을 클릭하면 아래에 내용이 표시됩니다."
